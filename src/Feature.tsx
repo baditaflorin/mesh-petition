@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   PersonalQR,
   makeScanPayload,
+  usePerPeerValue,
   type MeshConfig,
   type YRoom,
 } from "@baditaflorin/mesh-common";
@@ -10,6 +11,7 @@ type Props = { room: YRoom | null; config: MeshConfig };
 type Sig = { name: string; comment: string; ts: number };
 
 const NAME_KEY = (p: string) => `${p}:displayName`;
+const EMPTY_SIG: Sig = { name: "", comment: "", ts: 0 };
 
 export function Feature({ room, config }: Props) {
   if (!room) {
@@ -33,33 +35,31 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
   const [editing, setEditing] = useState(false);
   const [, rerender] = useState(0);
 
+  const signatures = usePerPeerValue<Sig>(room, "signatures", EMPTY_SIG);
+
   useEffect(() => {
     if (name) localStorage.setItem(NAME_KEY(config.storagePrefix), name);
   }, [name, config.storagePrefix]);
 
   useEffect(() => {
-    const sigs = room.doc.getMap<Sig>("signatures");
     const meta = room.doc.getMap<string>("meta");
     const cb = () => rerender((n) => n + 1);
-    sigs.observe(cb);
     meta.observe(cb);
     return () => {
-      sigs.unobserve(cb);
       meta.unobserve(cb);
     };
   }, [room]);
 
-  const sigs = room.doc.getMap<Sig>("signatures");
   const meta = room.doc.getMap<string>("meta");
   const title = meta.get("title") ?? "";
   const body = meta.get("body") ?? "";
 
   const sign = () => {
     if (!name.trim()) return;
-    sigs.set(room.peerId, { name: name.trim(), comment: comment.trim(), ts: Date.now() });
+    signatures.setMy({ name: name.trim(), comment: comment.trim(), ts: Date.now() });
     setComment("");
   };
-  const unsign = () => sigs.delete(room.peerId);
+  const unsign = () => signatures.clearMy();
 
   const saveMeta = () => {
     room.doc.transact(() => {
@@ -69,11 +69,11 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
     setEditing(false);
   };
 
-  const sigList: Array<Sig & { peerId: string }> = [];
-  sigs.forEach((v, k) => sigList.push({ ...v, peerId: k }));
-  sigList.sort((a, b) => b.ts - a.ts);
+  const sigList: Array<Sig & { peerId: string }> = signatures.entries
+    .map(([peerId, v]) => ({ ...v, peerId }))
+    .sort((a, b) => b.ts - a.ts);
 
-  const mySig = sigs.get(room.peerId);
+  const mySig = signatures.valueOf(room.peerId);
   const roomUrl = `${location.origin}${location.pathname}`;
   const inviteQR = makeScanPayload(room.roomId, "PETITION", title);
 
